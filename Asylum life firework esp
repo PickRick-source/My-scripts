@@ -1,0 +1,162 @@
+-- ScavengerHunt ESP
+-- Draws a BillboardGui label + Highlight on each ScavengerFirework1-20
+
+local Players       = game:GetService("Players")
+local RunService    = game:GetService("RunService")
+local Workspace     = game:GetService("Workspace")
+
+local player        = Players.LocalPlayer
+local ScavengerHunt = Workspace:WaitForChild("ScavengerHunt")
+
+-- ──────────────────────────────────────────────
+--  CONFIG
+-- ──────────────────────────────────────────────
+local ESP_COLOR       = Color3.fromRGB(255, 80, 80)
+local COLLECTED_COLOR = Color3.fromRGB(80, 255, 120)
+local UPDATE_RATE     = 0.05
+local HIGHLIGHT_FILL  = 0.5
+local SHOW_DISTANCE   = true
+local FONT            = Enum.Font.GothamBold
+local TEXT_SIZE       = 14
+
+-- ──────────────────────────────────────────────
+--  HELPERS
+-- ──────────────────────────────────────────────
+local function getPartPosition(obj)
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Model") and obj.PrimaryPart then return obj.PrimaryPart end
+    for _, v in ipairs(obj:GetDescendants()) do
+        if v:IsA("BasePart") then return v end
+    end
+    return nil
+end
+
+-- ──────────────────────────────────────────────
+--  BUILD ESP FOR ONE FIREWORK
+-- ──────────────────────────────────────────────
+local function buildESP(firework, label)
+    local adornPart = getPartPosition(firework)
+    if not adornPart then return nil, nil end
+
+    local hl = Instance.new("SelectionBox")
+    hl.Color3         = ESP_COLOR
+    hl.LineThickness  = 0.04
+    hl.SurfaceColor3  = ESP_COLOR
+    hl.SurfaceTransparency = HIGHLIGHT_FILL
+    hl.Adornee        = adornPart
+    hl.Parent         = Workspace
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name            = "ESP_" .. label
+    bb.AlwaysOnTop     = true
+    bb.Size            = UDim2.new(0, 140, 0, 44)
+    bb.StudsOffset     = Vector3.new(0, 3, 0)
+    bb.Adornee         = adornPart
+    bb.Parent          = Workspace
+
+    local bg = Instance.new("Frame", bb)
+    bg.Size             = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
+    bg.BackgroundTransparency = 0.3
+    bg.BorderSizePixel  = 0
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 6)
+
+    local stroke = Instance.new("UIStroke", bg)
+    stroke.Color     = ESP_COLOR
+    stroke.Thickness = 1.2
+
+    local nameLabel = Instance.new("TextLabel", bg)
+    nameLabel.Name              = "Name"
+    nameLabel.Text              = label
+    nameLabel.Font              = FONT
+    nameLabel.TextSize          = TEXT_SIZE
+    nameLabel.TextColor3        = Color3.fromRGB(255, 255, 255)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size              = UDim2.new(1, 0, 0.55, 0)
+    
+    local distLabel = Instance.new("TextLabel", bg)
+    distLabel.Name              = "Dist"
+    distLabel.Text              = "-- studs"
+    distLabel.Font              = Enum.Font.Gotham
+    distLabel.TextSize          = TEXT_SIZE - 2
+    distLabel.TextColor3        = ESP_COLOR
+    distLabel.BackgroundTransparency = 1
+    distLabel.Size              = UDim2.new(1, 0, 0.45, 0)
+    distLabel.Position          = UDim2.new(0, 0, 0.55, 0)
+
+    return bb, hl, adornPart, distLabel, stroke
+end
+
+-- ──────────────────────────────────────────────
+--  INIT ALL FIREWORKS
+-- ──────────────────────────────────────────────
+local espObjects = {}
+
+for i = 1, 20 do
+    local name     = "ScavengerFirework" .. i
+    local firework = ScavengerHunt:FindFirstChild(name)
+
+    if firework then
+        local bb, hl, part, distLabel, stroke = buildESP(firework, "🎆 Firework " .. i)
+        if bb then
+            espObjects[name] = {
+                firework  = firework,
+                billboard = bb,
+                highlight = hl,
+                part      = part,
+                distLabel = distLabel,
+                stroke    = stroke,
+            }
+            print(("[ESP] Tagged: %s"):format(name))
+        end
+    else
+        print(("[ESP] Missing from workspace: %s"):format(name))
+    end
+end
+
+print(("[ESP] Active on %d fireworks. Watching for changes..."):format(#espObjects))
+
+-- ──────────────────────────────────────────────
+--  LIVE UPDATE LOOP
+-- ──────────────────────────────────────────────
+local lastUpdate = 0
+
+RunService.Heartbeat:Connect(function()
+    if tick() - lastUpdate < UPDATE_RATE then return end
+    lastUpdate = tick()
+
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    for name, esp in pairs(espObjects) do
+        -- If the firework was removed from the game, clean up its ESP
+        if not esp.firework or not esp.firework.Parent then
+            print(("[ESP] Collected/Destroyed: %s — removing ESP"):format(name))
+            if esp.billboard and esp.billboard.Parent then esp.billboard:Destroy() end
+            if esp.highlight and esp.highlight.Parent then esp.highlight:Destroy() end
+            espObjects[name] = nil
+        else
+            -- Update distance
+            local dist = math.floor((hrp.Position - esp.part.Position).Magnitude)
+            if SHOW_DISTANCE then
+                esp.distLabel.Text = dist .. " studs"
+            end
+
+            -- Color shift when within 10 studs
+            local isClose = dist <= 10
+            local col = isClose and COLLECTED_COLOR or ESP_COLOR
+            esp.distLabel.TextColor3    = col
+            esp.stroke.Color            = col
+            esp.highlight.Color3        = col
+            esp.highlight.SurfaceColor3 = col
+        end
+    end
+end)
+
+-- Clean up if script is interrupted
+game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
+    for _, esp in pairs(espObjects) do
+        if esp.billboard and esp.billboard.Parent then esp.billboard:Destroy() end
+        if esp.highlight and esp.highlight.Parent then esp.highlight:Destroy() end
+    end
+end)
